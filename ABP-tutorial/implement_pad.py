@@ -4,19 +4,20 @@ from random import uniform
 from random import gauss
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import copy
+
 class Particle:
     def __init__(self, id, position, theta, velocity=[0.0, 0.0], force=[0.0, 0.0]):
         self.id = id
         self.position = np.array(position)
+        self.old_position = np.array(position)  # Store old position in particle
         self.theta = theta
         self.direction = np.array([cos(theta), sin(theta)])
         self.velocity = np.array(velocity)
         self.force = np.array(force)
 
 class ParticleSimulation:
-    def __init__(self, lx=50, ly=50, density=0.4, a=1, v0=1, noise_amplitude=pi/4,
-                 k=1, J=1, gamma_t=1, gamma_rot=1, Dr = 1, Dt = 1, dt=0.1):
+    def __init__(self, lx=20, ly=20, density=0.8, a=1, v0=1, noise_amplitude=pi/4,
+                 k=1, J=1, gamma_t=1, gamma_rot=1, Dr=1, Dt=1, dt=0.1):
         # System parameters
         self.lx, self.ly = lx, ly
         self.xmin, self.xmax = -0.5*lx, 0.5*lx
@@ -39,12 +40,12 @@ class ParticleSimulation:
         self.Dr = Dr
         self.Dt = Dt
         
-        # Initialize particles
+        # Initialize particles and neighbor list
         self.particles = self.initialize_particles()
-        self.old_pos = [[] for _ in range(self.N)]
         self.neighbors_list = [[] for _ in range(self.N)]
+        self.needs_rebuild = True  # Flag for neighbor list rebuild
         
-    def initialize_particles(self): #builder part
+    def initialize_particles(self):
         particles = []
         for i in range(self.N):
             position = [uniform(self.xmin, self.xmax), uniform(self.ymin, self.ymax)]
@@ -53,29 +54,33 @@ class ParticleSimulation:
         return particles
     
     def check_rebuild(self):
-        for p in self.particles:
-            dr = p.r - self.old_pos[p.id]
-            if sqrt(dr[0]**2 + dr[1]**2) >= 0.5*self.pad:
+        """Check if any particle has moved more than half the padding distance"""
+        for particle in self.particles:
+            dr = particle.position - particle.old_position
+            if np.linalg.norm(dr) >= 0.5 * self.pad:
                 return True
         return False
 
-
     def update_neighbors(self):
+        """Update neighbor list and store current positions"""
         self.neighbors_list = [[] for _ in range(self.N)]
         for i in range(self.N):
+            # Update old position when rebuilding neighbor list
+            self.particles[i].old_position = np.array(self.particles[i].position)
             for j in range(self.N):
                 if i != j:
                     dist = np.linalg.norm(self.particles[i].position - self.particles[j].position)
                     if dist < self.rcut + self.pad:
                         self.neighbors_list[i].append(j)
+        self.needs_rebuild = False
     
     def harmonic_force(self, d):
         return self.k * (2*self.a - d)
     
     def calculate_forces(self, i):
         particle = self.particles[i]
-        force = np.zeros(2) #reset force to 0
-        torque = 0 #reset torque to 0
+        force = np.zeros(2)
+        torque = 0
         
         for j in self.neighbors_list[i]:
             neighbor = self.particles[j]
@@ -92,19 +97,27 @@ class ParticleSimulation:
     
     def update_particle(self, i):
         particle = self.particles[i]
-        self.old_pos.append(copy(particle.position))
-        #if self.check_rebuild():
-            #self.update_neighbors()
+        
+        # Check if we need to rebuild neighbor list
+        if not self.needs_rebuild:
+            self.needs_rebuild = self.check_rebuild()
+            
         force, torque = self.calculate_forces(i)
+        
+        # Add thermal noise
         thermal_noise_rot = sqrt(2*self.Dr*self.dt)*gauss(0,1)
         thermal_noise_trans = sqrt(2*self.Dt*self.dt)*gauss(0,1)
         
+        # Update orientation
         particle.theta += (torque/self.gamma_rot) * self.dt + thermal_noise_rot
-        particle.direction = np.array([cos(particle.theta), sin(particle.theta)]) + thermal_noise_trans
+        particle.direction = np.array([cos(particle.theta), sin(particle.theta)])
         
-        particle.velocity = (self.v0 * particle.direction + force/self.gamma_t)
+        # Update velocity and position
+        noise_vector = np.array([gauss(0,1), gauss(0,1)]) * thermal_noise_trans
+        particle.velocity = (self.v0 * particle.direction + force/self.gamma_t) + noise_vector
         particle.position += particle.velocity * self.dt
         
+        # Apply periodic boundary conditions
         particle.position[0] = ((particle.position[0] + self.lx/2) % self.lx) - self.lx/2
         particle.position[1] = ((particle.position[1] + self.ly/2) % self.ly) - self.ly/2
     
@@ -124,7 +137,8 @@ class ParticleSimulation:
                           scale=25)
         
         def animate(frame):
-            if frame % 10 == 0:
+            # Update neighbor list if needed
+            if self.needs_rebuild:
                 self.update_neighbors()
             
             for i in range(self.N):
@@ -143,5 +157,6 @@ class ParticleSimulation:
         plt.show()
         return ani
 
+# Create and run simulation
 sim = ParticleSimulation()
 sim.simulate()

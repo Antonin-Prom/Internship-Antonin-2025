@@ -81,7 +81,6 @@ def force_and_torque(i):
     force = [fx,fy]
     return force,tau
 
-
 def update(i):
     part = particles[i]
     x,y = part[1]
@@ -89,7 +88,17 @@ def update(i):
     nx,ny = part[3]
     vx,vy = part[4]
     fx,fy = part[5]
-
+    force,tau = force_and_torque(i)
+    theta = tau
+    vx = vx*cos(theta)
+    vy = vy*sin(theta)
+    vx += fx
+    vy += fy
+    x = x + vx
+    y = y + vy
+    part[1] = x,y
+    part[2] = theta
+    
 #simulation
 fig, ax = plt.subplots()
 ax.set_xlim(-lx / 2, lx / 2)
@@ -100,7 +109,6 @@ ax.set_title('Particle Dynamics')
 # Create plot objects for particles
 scatter = ax.scatter([], [], s=30, c='blue')
 
-# Update function for animation
 def animate(frame):
     if frame%10:
         update_neighbors()  

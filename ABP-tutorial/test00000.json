@@ -1,0 +1,12 @@
+{
+    "system": {
+        "Number": {
+            "N": 40
+        },
+        "box": {
+            "Lx": 10,
+            "Ly": 10
+        },
+        "particles": [
+            {
+                "r": 
