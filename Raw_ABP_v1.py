@@ -16,20 +16,20 @@ class Particle:
         self.position = np.array(position)
         self.theta = theta
         self.direction = np.array([cos(theta), sin(theta)])
-        self.velocity = np.array(velocity)
+        self.d_theta = 0
+        self.displacement = np.array(velocity)
         self.force = np.array(force)
         self.tau = 0
-        self.E_ela = 0
-        self.E_torque = 0
+
 
 class ParticleSimulation:
-    def __init__(self, lx=20, ly=20, density=0.4, a=1, v0=1, noise_amplitude=0,
+    def __init__(self, lx=20, ly=20, density=0.4, a=1, v0=0.1, noise_amplitude=0.01,
                  k=1, J=1, gamma_t=1, gamma_rot=1, Dr=1, Dt= 0, dt=0.1):
         
         #Box parameters
         self.lx, self.ly = lx, ly
-        self.xmin, self.xmax = -0.5*lx, 0.5*lx
-        self.ymin, self.ymax = -0.5*ly, 0.5*ly
+        self.xmin, self.xmax = 0, lx
+        self.ymin, self.ymax = 0, ly
 
         # Particle parameters
         self.N = int(lx*ly*density)
@@ -49,8 +49,11 @@ class ParticleSimulation:
 
         #Initalise
         self.particles = []
-        self.neighbors = [[] for _ in range(self.N)]
-        self.dump_jump = 10 #dump every 10dt
+        self.dump_jump = 2 #dump every 10dt
+        self.particles_positions = None
+        self.particles_displacement = np.zeros((self.N,2),dtype=float)
+        self.particles_d_theta =np.zeros(self.N)
+        self.particles_thetas = None
 
     def initialise_file(self,outfile = 'raw.json'):
         particles = []
@@ -80,67 +83,50 @@ class ParticleSimulation:
             for p in data['system']['particles']:
                 x, y = p['r']
                 theta = p['theta']
-                self.particles.append(Particle(id=id,position=[x,y],theta=theta,velocity=[0.0, 0.0], force=[0.0, 0.0]))
-        
-    def build_neighbor(self):
-        self.neighbors = [[] for _ in range(self.N)]
-        for i in range(self.N):
-            for j in range(self.N):
-                if i != j:
-                    dist = np.linalg.norm(self.particles[i].position - self.particles[j].position)
-                    if dist <= self.rcut: 
-                        self.neighbors[i].append(j)         
-
+                self.particles.append(Particle(id=id,position=[x,y],theta=theta,velocity=[0.0, 0.0], force=[0.0, 0.0]))      
+            self.particles_positions = np.array([p.position for p in self.particles])
+            self.particles_thetas = np.array([p.theta for p in self.particles])
     def harmonic_force(self, d):
-        return self.k * (2*self.a - d)     
-
-    def elastic_energy(self, d):
-        return self.k * ( 2*self.a - d**2 ) 
-
-    def torque_energy(self,theta_i,theta_j):
-        return -self.J*cos(theta_i - theta_j)
+        return -self.k * (self.a - d)     
 
     def calculate_force_torque(self, i):
         particle = self.particles[i]
         force = np.zeros(2)
         torque = 0
         self.E_ela,self.E_torque = 0,0
-        xi = particle.position[0]
-        yi = particle.position[1]
-        for j in self.neighbors[i]:
+        xi = particle.position[0]%self.lx
+        yi = particle.position[1]%self.ly
+        for j in range(i+1,self.N):   
             neighbor = self.particles[j]
+            xj = neighbor.position[0]%self.lx
+            yj = neighbor.position[1]%self.ly
             diff = particle.position - neighbor.position
+            diff[0] = diff[0] - self.lx * round(diff[0] / self.lx)
+            diff[1] = diff[1] - self.ly * round(diff[1] / self.ly)
             d = np.linalg.norm(diff)
-            xj = neighbor.position[0]
-            yj = neighbor.position[1]
-            if d < 2*self.a:
-                force_magnitude = self.harmonic_force(d)
-                force += force_magnitude * (diff / d)
-                particle.E_ela += self.elastic_energy(d)
+            if d <= self.rcut:
+                if d < 2*self.a:
+                    force_magnitude = self.harmonic_force(d)
+                    particle.force += force_magnitude * (diff / d)
+                    neighbor.force -= force_magnitude * (diff / d)
+                tau_z = self.J*(xi*yj - yi*xj)
+                particle.tau += tau_z 
+                neighbor.tau -= tau_z
                 
-            tau_z = self.J*(xi*yj - yi*xj)
-            particle.E_torque = self.torque_energy(particle.theta, neighbor.theta)
-            particle.tau += tau_z 
-        return force,particle.tau,particle.E_torque,particle.E_ela
     
-    def update_velocities(self,i):     
+    def update_displacements(self,i):     
         particle = self.particles[i]
-        force, torque,_,_ = self.calculate_force_torque(i)
+        self.calculate_force_torque(i)
         #thermal_noise_rot = sqrt(2*self.Dr*self.dt)*gauss(0,1)
         thermal_noise_rot = uniform(-self.noise_amplitude,+self.noise_amplitude)
         thermal_amplitude_trans = sqrt(2*self.Dt*self.dt)
 
-        
-        particle.direction = np.array([cos(particle.theta), sin(particle.theta)])
         noise_vector = np.array([gauss(0,1), gauss(0,1)]) * thermal_amplitude_trans
-        particle.displacement = (self.v0 * particle.direction + force/self.gamma_t)*self.dt + noise_vector
-        particle.d_theta += (torque/self.gamma_rot) * self.dt + thermal_noise_rot
-        '''
-        particle.position += particle.velocity * self.dt 
-        # Apply periodic boundary conditions
-        particle.position[0] = ((particle.position[0] + self.lx/2) % self.lx) - self.lx/2
-        particle.position[1] = ((particle.position[1] + self.ly/2) % self.ly) - self.ly/2
-        '''
+        particle.displacement = (self.v0 * particle.direction + particle.force/self.gamma_t) * self.dt + noise_vector
+        particle.d_theta += (particle.tau/self.gamma_rot) * self.dt + thermal_noise_rot
+        self.particles_displacement[i] = particle.displacement
+        self.particles_d_theta[i] = particle.d_theta
+
 
     def dump_data(self, outfile):
         with open(outfile, 'w') as out:
@@ -148,31 +134,31 @@ class ParticleSimulation:
             lx = self.lx
             ly = self.ly
             out.write('{:.0f}\n'.format(N))
-            out.write('{:.0f}   {:.0f}\n'.format(lx,ly))
-            for p in self.particles:
-                x, y = p.position
-                theta = p.theta%(2*pi)
-                out.write('{:.6f}  {:.6f}  {:.6f}\n'.format(x, y, theta))
-
-    def dump_analysis(self, outfile, t):
-        with open(outfile, 'w') as out:
-            for p in self.particles:
-                out.write('{:.6f}  {:.6f}  {:.6f}   {:.6f}  {:.6f}\n'.format(t, p.E_torque,p.E_ela,p.direction[0],p.direction[1]))
-        
+            out.write('{:.0f} {:.0f}\n'.format(lx,ly))
+            for i in range(self.N):
+                x, y = self.particles_positions[i]
+                theta = self.particles_thetas[i] % (2*np.pi)
+                out.write('{:.6f} {:.6f} {:.6f}\n'.format(x, y, theta))
 
     def simulate(self,t):
-        self.build_neighbor()
         for i in range(self.N):
-            self.update_velocities(i)
-        self.particles.positions += self.particles.velocity
-        self.particles.theta  += self.d_theta
-        if t%self.dump_jump==0:
-            sim.dump_data(f'10snapshot{t:05d}.txt')
-            sim.dump_analysis(f'snapoutE{t:05d}.txt',t)
+            self.update_displacements(i)
+        print(self.particles[1].tau)
+
+        self.particles_positions += self.particles_displacement
+        
+        self.particles_positions[:, 0] %= self.lx
+        self.particles_positions[:, 1] %= self.ly
+        
+        self.particles_thetas += self.particles_d_theta
+        
+        if t % self.dump_jump == 0:
+            self.dump_data(f'10snapshot{t:05d}.txt')
+
 
 sim = ParticleSimulation()
 sim.initialise_file(outfile = 'raw.json')
-duration = 1000
+duration = 500
 sim.read_init_config()
 for t in range(duration):
     sim.simulate(t)

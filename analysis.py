@@ -21,4 +21,5 @@ def traj_related():
 
 e = Output_analyzer(pattern = 'snapoutE*.txt')
 e.rebuild()
-e.Energy_plot()
+e.Energy_plot_all()
+e.plot_order_param()

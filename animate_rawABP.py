@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import glob
 import os
-
+from IPython import display 
 def read_snapshot(filename):
     """Read a single snapshot file and return particle data"""
     with open(filename, 'r') as f:
@@ -22,7 +22,7 @@ def read_snapshot(filename):
             
     return np.array(positions), np.array(thetas), lx, ly
 
-def animate_snapshots(snapshot_pattern='10snapshot*.txt'):
+def animate_snapshots(snapshot_pattern='1000snapshot00*.txt'):
     # Get list of snapshot files sorted by number
     files = sorted(glob.glob(snapshot_pattern))
     if not files:
@@ -69,8 +69,10 @@ def animate_snapshots(snapshot_pattern='10snapshot*.txt'):
     # Create animation
     num_frames = len(files)
     ani = animation.FuncAnimation(fig, update, frames=num_frames,
-                                interval=50, blit=True)
-    
+                                interval=1, blit=True)
+    writervideo = animation.PillowWriter(fps=60)
+    ani.save('animation1.html', writer='html')
+    plt.close() 
     plt.show()
     return ani
 
