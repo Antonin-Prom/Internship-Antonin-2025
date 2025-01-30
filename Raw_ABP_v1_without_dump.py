@@ -23,12 +23,12 @@ class Particle:
 
 class ParticleSimulation:
     def __init__(self, lx=50, ly=50, density=0.4, a=1, v0=1,
-                 k=10, J=1, gamma_t=1, gamma_rot=1, T=0.1, dt=0.1):
+                 k=1, J=1, gamma_t=1, gamma_rot=1, T=1, dt=0.1):
         
         #Box parameters
         self.lx, self.ly = lx, ly
-        self.xmin, self.xmax = 0, lx
-        self.ymin, self.ymax = 0, ly
+        self.xmin, self.xmax = -0.5*lx, 0.5*lx
+        self.ymin, self.ymax = -0.5*ly, 0.5*ly
 
         # Particle parameters
         self.N = int(lx*ly*density)
@@ -44,7 +44,7 @@ class ParticleSimulation:
         self.T = T
         self.dt = dt
         self.Dr = self.T/self.gamma_rot
-        self.Dt = self.T/self.gamma_t
+        self.Dt = 0 #self.T/self.gamma_t
 
         #Initalise
         self.particles = []
@@ -89,10 +89,36 @@ class ParticleSimulation:
             self.particles_positions = np.array([p.position for p in self.particles])
             self.particles_thetas = np.array([p.theta for p in self.particles])
             self.particles_direction = np.array([[cos(p.theta),sin(p.theta)] for p in self.particles])
-
+    
+    def read_init_tuto(self, initfile):
+        """
+        Read the initial configuration from a JSON file.
+        Parameter
+        ---------
+            initfile : str
+            Name of the input JSON file
+        """
+        with open(initfile) as f:
+            data = json.load(f)
+            Lx = data["system"]["box"]["Lx"]
+            Ly = data["system"]["box"]["Ly"]
+            self.lx,self.ly = Lx, Ly
+            self.particles = []
+            for p in data['system']['particles']:
+                x, y = p['r']
+                nx, ny = p['n']
+                vx, vy = p['v']
+                fx, fy = p['f']
+                theta = np.arccos(nx)
+                self.particles.append(Particle(id=id,position=[x,y],theta=theta,velocity=[0.0, 0.0], force=[0.0, 0.0]))   
+            self.N = len(self.particles)      
+            self.particles_positions = np.array([p.position for p in self.particles])
+            self.particles_thetas = np.array([p.theta for p in self.particles])
+            self.particles_direction = np.array([[cos(p.theta),sin(p.theta)] for p in self.particles])
+ 
     def harmonic_force(self, d):
-        return self.k * (2*self.a - d)     
-
+        return self.k * (2*self.a - d)   
+    
     def calculate_force_torque(self, i):       
         for j in range(i+1,self.N):   
 
@@ -108,13 +134,14 @@ class ParticleSimulation:
 
 
                 diff_angle = self.particles_thetas[j] - self.particles_thetas[i]
-                tau_z = self.J*sin(diff_angle)
+                
+                self.J*(self.particles_direction[i][0]*self.particles_direction[j][1] - self.particles_direction[j][0]*self.particles_direction[i][1])
+                tau_z = self.J*(self.particles_direction[i][0]*self.particles_direction[j][1] - self.particles_direction[j][0]*self.particles_direction[i][1]) #self.J*sin(diff_angle)
                 self.particles_Tau[i] += tau_z 
                 self.particles_Tau[j] -= tau_z
 
 
     def update_displacements(self,i):     
-        particle = self.particles[i]
         self.calculate_force_torque(i)
         thermal_noise_rot = sqrt(2*self.Dr*self.dt)*gauss(0,1)
         thermal_amplitude_trans = sqrt(2*self.Dt*self.dt)
@@ -136,11 +163,6 @@ class ParticleSimulation:
                 theta = self.particles_thetas[i] % (2*np.pi)
                 out.write('{:.6f} {:.6f} {:.6f}\n'.format(x, y, theta))
 
-    def dump_analysis(self, outfile, t):
-        with open(outfile, 'w') as out:
-            for i in range(self.N):
-                out.write('{:.6f}  {:.6f}  {:.6f}   {:.6f}  {:.6f}\n'.format(
-                    t, self.particles_E_torque[i],self.particles_E_harm[i],self.particles_direction[i][0],self.particles_direction[i][1]))
 
     def simulate(self,t):
         #reset
@@ -151,25 +173,27 @@ class ParticleSimulation:
         for i in range(self.N):
             self.update_displacements(i)
 
-        if t % self.dump_jump == 0:
-            self.dump_data(f'1000snapshot{t:05d}.txt')
-            self.dump_analysis( f'1000snapoutE{t:05d}.txt', t)
+
 
         self.particles_positions += self.particles_displacement
         
-        self.particles_positions[:, 0] %= self.lx
-        self.particles_positions[:, 1] %= self.ly
+        self.particles_positions[:, 0] = ((self.particles_positions[:, 0]+ self.lx/2) % self.lx) - self.lx/2
+        self.particles_positions[:, 1] = ((self.particles_positions[:, 1]+ self.ly/2) % self.ly) - self.ly/2
+ 
         
         self.particles_thetas += self.particles_d_theta
         self.particles_direction = np.array([[cos(self.particles_thetas[i]),sin(self.particles_thetas[i])] for i in range(self.N)])
 
+        if t % self.dump_jump == 0:
+            self.dump_data(f'1000snapshot{t:05d}.txt')
         
 
 
 
 sim = ParticleSimulation()
-sim.initialise_file(outfile = 'raw.json')
+
 duration = 1000
-sim.read_init_config()
+sim.read_init_tuto('init.json')
 for t in range(duration):
     sim.simulate(t)
+    print(t)

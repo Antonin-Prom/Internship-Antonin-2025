@@ -23,12 +23,12 @@ class Particle:
 
 class ParticleSimulation:
     def __init__(self, lx=50, ly=50, density=0.4, a=1, v0=1,
-                 k=10, J=1, gamma_t=1, gamma_rot=1, T=0.1, dt=0.1):
+                 k=1, J=1, gamma_t=1, gamma_rot=1, T=0.1, dt=0.1):
         
         #Box parameters
         self.lx, self.ly = lx, ly
-        self.xmin, self.xmax = 0, lx
-        self.ymin, self.ymax = 0, ly
+        self.xmin, self.xmax = -0.5*lx, 0.5*lx
+        self.ymin, self.ymax = -0.5*ly, 0.5*ly
 
         # Particle parameters
         self.N = int(lx*ly*density)
@@ -92,6 +92,32 @@ class ParticleSimulation:
             self.particles_thetas = np.array([p.theta for p in self.particles])
             self.particles_direction = np.array([[cos(p.theta),sin(p.theta)] for p in self.particles])
 
+    def read_init_tuto(self, initfile):
+        """
+        Read the initial configuration from a JSON file.
+        Parameter
+        ---------
+            initfile : str
+            Name of the input JSON file
+        """
+        with open(initfile) as f:
+            data = json.load(f)
+            Lx = data["system"]["box"]["Lx"]
+            Ly = data["system"]["box"]["Ly"]
+            self.lx,self.ly = Lx, Ly
+            self.particles = []
+            for p in data['system']['particles']:
+                x, y = p['r']
+                nx, ny = p['n']
+                vx, vy = p['v']
+                fx, fy = p['f']
+                theta = np.arccos(p['n'][0])
+                self.particles.append(Particle(id=id,position=[x,y],theta=theta,velocity=[0.0, 0.0], force=[0.0, 0.0]))   
+            self.N = len(self.particles)      
+            self.particles_positions = np.array([p.position for p in self.particles])
+            self.particles_thetas = np.array([p.theta for p in self.particles])
+            self.particles_direction = np.array([[cos(p.theta),sin(p.theta)] for p in self.particles])
+
     def harmonic_force(self, d):
         return self.k * (2*self.a - d)     
 
@@ -105,7 +131,7 @@ class ParticleSimulation:
         
         for j in range(i+1,self.N):   
 
-            diff = self.particles_positions[i]- self.particles_positions[j]
+            diff = self.particles_positions[i]- self.particles_positions[j] #carefull i-j so positive force
             diff[0] = diff[0] - self.lx * round(diff[0] / self.lx)
             diff[1] = diff[1] - self.ly * round(diff[1] / self.ly)
             d = np.linalg.norm(diff)
@@ -170,19 +196,17 @@ class ParticleSimulation:
 
         self.particles_positions += self.particles_displacement
         
-        self.particles_positions[:, 0] %= self.lx
-        self.particles_positions[:, 1] %= self.ly
+        self.particles_positions[:, 0] = ((self.particles_positions[:, 0]+ self.lx/2) % self.lx) - self.lx/2
+        self.particles_positions[:, 1] %= ((self.particles_positions[:, 1]+ self.lx/2) % self.lx) - self.lx/2
         
         self.particles_thetas += self.particles_d_theta
         self.particles_direction = np.array([[cos(self.particles_thetas[i]),sin(self.particles_thetas[i])] for i in range(self.N)])
 
-        
-
-
 
 sim = ParticleSimulation()
-sim.initialise_file(outfile = 'raw.json')
+#sim.initialise_file(outfile = 'raw.json')
 duration = 1000
-sim.read_init_config()
+sim.read_init_tuto('init.json')
 for t in range(duration):
+    print(t)
     sim.simulate(t)
